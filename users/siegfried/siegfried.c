@@ -1,0 +1,137 @@
+/* Copyright 2021 Jonavin Eng @Jonavin
+   Copyright 2022 gourdo1 <gourdo1@outlook.com>
+   Copyright 2023 minhld <minhld139@gmail.com>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#include QMK_KEYBOARD_H
+
+#include "siegfried.h"
+
+
+// RGB NIGHT MODE
+#ifdef RGB_MATRIX_ENABLE
+    static bool rgb_nightmode = false;
+
+    // Turn on/off RGB night mode if current state is different
+    void activate_rgb_nightmode(bool turn_on) {
+        if (rgb_nightmode != turn_on) {
+            rgb_nightmode = !rgb_nightmode;
+        }
+    }
+
+    bool get_rgb_nightmode(void) {
+        return rgb_nightmode;
+    }
+#endif // RGB_MATRIX_ENABLE
+
+
+// IDLE TIMEOUTS
+#ifdef IDLE_TIMEOUT_ENABLE
+    static uint16_t timeout_timer = 0;
+    static uint16_t timeout_counter = 0; //in minute intervals
+    static uint16_t timeout_threshold = TIMEOUT_THRESHOLD_DEFAULT;
+
+    uint16_t get_timeout_threshold(void) {
+        return timeout_threshold;
+    }
+
+    void timeout_reset_timer(void) {
+        timeout_timer = timer_read();
+        timeout_counter = 0;
+    };
+
+    void timeout_update_threshold(bool increase) {
+        if (increase && timeout_threshold < TIMEOUT_THRESHOLD_MAX) timeout_threshold++;
+        if (!increase && timeout_threshold > 0) timeout_threshold--;
+    };
+
+    void timeout_tick_timer(void) {
+        if (timeout_threshold > 0) {
+            if (timer_elapsed(timeout_timer) >= 60000) { // 1 minute tick
+                timeout_counter++;
+                timeout_timer = timer_read();
+            }
+            #ifdef RGB_MATRIX_ENABLE
+            if (timeout_threshold > 0 && timeout_counter >= timeout_threshold) {
+                rgb_matrix_disable_noeeprom();
+            }
+            #endif
+        } // timeout_threshold = 0 will disable timeout
+    }
+#endif // IDLE_TIMEOUT_ENABLE
+
+
+bool process_record_user(uint16_t keycode, keyrecord_t* record) {
+    switch (keycode) {
+        // Lock Windows key
+        case WINLOCK:
+            if (record->event.pressed) {
+                keymap_config.no_gui = !keymap_config.no_gui; // toggle status
+            } else
+                unregister_code16(keycode);
+            break;
+
+        #ifdef IDLE_TIMEOUT_ENABLE
+            case RGB_TOI:
+                if (record -> event.pressed) {
+                    timeout_update_threshold(true); //increase timeout
+                } else unregister_code16(keycode);
+                break;
+            case RGB_TOD:
+                if (record -> event.pressed) {
+                    timeout_update_threshold(false); //decrease timeout
+                } else unregister_code16(keycode);
+                break;
+        #endif // IDLE_TIMEOUT_ENABLE
+
+        #ifdef RGB_MATRIX_ENABLE
+            case RGB_NITE:
+                if (record -> event.pressed) {
+                    rgb_nightmode = !rgb_nightmode;
+                } else unregister_code16(keycode);
+                break;
+        #endif // RGB_MATRIX_ENABLE
+
+        default:
+            if (record->event.pressed) {
+                #ifdef RGB_MATRIX_ENABLE
+                    rgb_matrix_enable();
+                #endif
+                #ifdef IDLE_TIMEOUT_ENABLE
+                    timeout_reset_timer(); //reset activity timer
+                #endif
+            }
+            break;
+    }
+    return true;
+};
+
+
+#if defined(ALTTAB_SCROLL_ENABLE) || defined(IDLE_TIMEOUT_ENABLE) // timer features
+    __attribute__((weak)) void matrix_scan_keymap(void) {}
+
+    void matrix_scan_user(void) {
+        #ifdef ALTTAB_SCROLL_ENABLE
+        encoder_tick_alttabscroll();
+        #endif
+        #ifdef IDLE_TIMEOUT_ENABLE
+        timeout_tick_timer();
+        #endif
+        matrix_scan_keymap();
+    }
+    
+#endif // ALTTAB_SCROLL_ENABLE or IDLE_TIMEOUT_ENABLE
+
